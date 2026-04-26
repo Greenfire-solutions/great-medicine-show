@@ -1,0 +1,842 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { musicTracks } from './data/musicData'
+import { storeItems } from './data/storeData'
+import { upcomingShows, bookingOffers } from './data/showsData'
+import { courses } from './data/coursesData'
+
+const guilds = ['Fire Guild', 'Water Guild', 'Earth Guild', 'Air Guild']
+const saveKey = 'gms-cyber-hall-profile'
+const stepAmount = 2.5
+
+const mapDefinitions = {
+  overworld: {
+    title: 'Overworld Map',
+    nodes: [
+      { id: 'hall', name: 'Hall of Great Works', x: 50, y: 48, tone: 'hall', type: 'map', targetMap: 'hall' },
+      { id: 'civilx', name: 'CivilX Lab', x: 84, y: 28, tone: 'lab', type: 'map', targetMap: 'civilx' },
+      { id: 'fire', name: 'Fire Temple', x: 20, y: 22, tone: 'fire', type: 'map', targetMap: 'fireTemple' },
+      { id: 'water', name: 'Water Temple', x: 80, y: 20, tone: 'water', type: 'map', targetMap: 'waterTemple' },
+      { id: 'earth', name: 'Earth Temple', x: 20, y: 78, tone: 'earth', type: 'map', targetMap: 'earthTemple' },
+      { id: 'air', name: 'Air Temple', x: 80, y: 78, tone: 'air', type: 'map', targetMap: 'airTemple' },
+      { id: 'course', name: 'Course Academy', x: 50, y: 10, tone: 'courses', type: 'page' }
+    ]
+  },
+  hall: {
+    title: 'Hall of Great Works Interior',
+    nodes: [
+      {
+        id: 'music',
+        name: 'Music Hall',
+        x: 20,
+        y: 26,
+        tone: 'music',
+        type: 'page',
+        prompt: 'Enter Music Hall?',
+        actionLabel: 'Enter Music Hall'
+      },
+      { id: 'store', name: 'Store', x: 80, y: 28, tone: 'store', type: 'page', prompt: 'Browse Store?', actionLabel: 'Browse Store' },
+      {
+        id: 'shows',
+        name: 'Shows / Booking Desk',
+        x: 52,
+        y: 52,
+        tone: 'shows',
+        type: 'page',
+        prompt: 'View Shows?',
+        actionLabel: 'View Shows'
+      },
+      {
+        id: 'course-link',
+        name: 'Courses Portal',
+        x: 18,
+        y: 76,
+        tone: 'courses',
+        type: 'page',
+        prompt: 'Go to Courses?',
+        actionLabel: 'Go to Courses'
+      },
+      {
+        id: 'hall-exit',
+        name: 'Exit to Overworld',
+        x: 80,
+        y: 78,
+        tone: 'exit',
+        type: 'map',
+        targetMap: 'overworld',
+        prompt: 'Return to Overworld?',
+        actionLabel: 'Exit Hall'
+      }
+    ]
+  },
+  civilx: {
+    title: 'CivilX Lab Interior',
+    nodes: [
+      { id: 'station-a', name: 'Project Station Alpha', x: 26, y: 26, tone: 'lab', type: 'quest' },
+      { id: 'station-b', name: 'Project Station Beta', x: 76, y: 28, tone: 'lab', type: 'quest' },
+      { id: 'quest-board', name: 'Quest Board Placeholder', x: 48, y: 58, tone: 'lab', type: 'quest' },
+      { id: 'civilx-exit', name: 'Back to Overworld Exit', x: 78, y: 82, tone: 'exit', type: 'map', targetMap: 'overworld' }
+    ]
+  },
+  fireTemple: {
+    title: 'Fire Temple Interior',
+    nodes: [
+      { id: 'fire-quest', name: 'Fire Projects / Quests Placeholder', x: 48, y: 42, tone: 'fire', type: 'quest' },
+      { id: 'fire-exit', name: 'Back to Overworld Exit', x: 76, y: 80, tone: 'exit', type: 'map', targetMap: 'overworld' }
+    ]
+  },
+  waterTemple: {
+    title: 'Water Temple Interior',
+    nodes: [
+      { id: 'water-quest', name: 'Water Projects / Quests Placeholder', x: 48, y: 42, tone: 'water', type: 'quest' },
+      { id: 'water-exit', name: 'Back to Overworld Exit', x: 76, y: 80, tone: 'exit', type: 'map', targetMap: 'overworld' }
+    ]
+  },
+  earthTemple: {
+    title: 'Earth Temple Interior',
+    nodes: [
+      { id: 'earth-quest', name: 'Earth Projects / Quests Placeholder', x: 48, y: 42, tone: 'earth', type: 'quest' },
+      { id: 'earth-exit', name: 'Back to Overworld Exit', x: 76, y: 80, tone: 'exit', type: 'map', targetMap: 'overworld' }
+    ]
+  },
+  airTemple: {
+    title: 'Air Temple Interior',
+    nodes: [
+      { id: 'air-quest', name: 'Air Projects / Quests Placeholder', x: 48, y: 42, tone: 'air', type: 'quest' },
+      { id: 'air-exit', name: 'Back to Overworld Exit', x: 76, y: 80, tone: 'exit', type: 'map', targetMap: 'overworld' }
+    ]
+  }
+}
+
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
+
+const getSavedProfile = () => {
+  try {
+    const value = localStorage.getItem(saveKey)
+    return value ? JSON.parse(value) : null
+  } catch {
+    return null
+  }
+}
+
+function App() {
+  const savedProfile = useMemo(getSavedProfile, [])
+  const [step, setStep] = useState(savedProfile ? 4 : 1)
+  const [guild, setGuild] = useState(savedProfile?.guild || '')
+  const [name, setName] = useState(savedProfile?.name || '')
+  const [currentMap, setCurrentMap] = useState('overworld')
+  const [activeSection, setActiveSection] = useState('Hall of Great Works')
+  const [playerPosition, setPlayerPosition] = useState({ x: 50, y: 52 })
+  const [dialogueNode, setDialogueNode] = useState(null)
+  const [navOpen, setNavOpen] = useState(false)
+  const [hallOverlay, setHallOverlay] = useState(null)
+  const [activeTrackIndex, setActiveTrackIndex] = useState(0)
+  const [playerMessage, setPlayerMessage] = useState('')
+  const [isTrackPlaying, setIsTrackPlaying] = useState(false)
+  const [trackSearch, setTrackSearch] = useState('')
+  const [trackCategory, setTrackCategory] = useState('All')
+  const [storeSearch, setStoreSearch] = useState('')
+  const [storeCategory, setStoreCategory] = useState('All')
+  const [courseSearch, setCourseSearch] = useState('')
+  const [courseCategory, setCourseCategory] = useState('All')
+  const [bookingForm, setBookingForm] = useState(null)
+  const [bookingSubmitting, setBookingSubmitting] = useState(false)
+  const [bookingStatus, setBookingStatus] = useState('')
+  const audioRef = useRef(null)
+
+  const currentMapDef = mapDefinitions[currentMap]
+
+  const activeTrack = musicTracks[activeTrackIndex] || musicTracks[0]
+  const trackCategories = ['All', ...new Set(musicTracks.map((track) => track.category).filter(Boolean))]
+  const filteredTracks = musicTracks.filter((track) => {
+    const matchesCategory = trackCategory === 'All' || track.category === trackCategory
+    const text = `${track.title} ${track.artist} ${track.album} ${track.description}`.toLowerCase()
+    const matchesSearch = text.includes(trackSearch.toLowerCase())
+    return matchesCategory && matchesSearch
+  })
+
+  const storeCategories = ['All', ...new Set(storeItems.map((item) => item.category))]
+  const filteredStoreItems = storeItems.filter((item) => {
+    const categoryMatch = storeCategory === 'All' || item.category === storeCategory
+    const searchText = `${item.name} ${item.category} ${item.description}`.toLowerCase()
+    return categoryMatch && searchText.includes(storeSearch.toLowerCase())
+  })
+
+  const courseCategories = ['All', ...new Set(courses.map((course) => course.category))]
+  const filteredCourses = courses.filter((course) => {
+    const categoryMatch = courseCategory === 'All' || course.category === courseCategory
+    const searchText = `${course.title} ${course.category} ${course.level} ${course.description}`.toLowerCase()
+    return categoryMatch && searchText.includes(courseSearch.toLowerCase())
+  })
+
+  const selectTrack = (index) => {
+    setActiveTrackIndex(index)
+    setPlayerMessage('')
+    setIsTrackPlaying(false)
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.currentTime = 0
+    }
+  }
+
+
+  const changeTrack = (delta) => {
+    const nextIndex = (activeTrackIndex + delta + musicTracks.length) % musicTracks.length
+    selectTrack(nextIndex)
+  }
+
+  const togglePreview = () => {
+    if (!activeTrack?.audioUrl) {
+      setPlayerMessage('Preview coming soon')
+      return
+    }
+
+    if (!audioRef.current) {
+      audioRef.current = new Audio(activeTrack.audioUrl)
+    }
+
+    if (audioRef.current.src !== activeTrack.audioUrl) {
+      audioRef.current.src = activeTrack.audioUrl
+    }
+
+    if (audioRef.current.paused) {
+      audioRef.current.play().then(() => setIsTrackPlaying(true)).catch(() => setPlayerMessage('Preview unavailable'))
+    } else {
+      audioRef.current.pause()
+      setIsTrackPlaying(false)
+    }
+  }
+
+  const enterWorld = () => {
+    const profile = { guild, name: name.trim() }
+    localStorage.setItem(saveKey, JSON.stringify(profile))
+    setStep(4)
+  }
+
+  const movePlayer = (dx, dy) => {
+    setPlayerPosition((prev) => ({
+      x: clamp(prev.x + dx, 4, 96),
+      y: clamp(prev.y + dy, 4, 96)
+    }))
+  }
+
+  const nearbyLocation = useMemo(() => {
+    let closest = null
+    let closestDistance = Number.POSITIVE_INFINITY
+
+    for (const location of currentMapDef.nodes) {
+      const distance = Math.hypot(playerPosition.x - location.x, playerPosition.y - location.y)
+      if (distance < closestDistance) {
+        closestDistance = distance
+        closest = location
+      }
+    }
+
+    return closestDistance <= 11 ? closest : null
+  }, [playerPosition, currentMapDef.nodes])
+
+  const openDialogue = (node) => {
+    setDialogueNode(node)
+  }
+
+  const closeDialogue = () => setDialogueNode(null)
+
+  const handleNodeAction = (node, action) => {
+    if (action === 'yes' && node.type === 'map' && node.targetMap) {
+      setCurrentMap(node.targetMap)
+      setPlayerPosition({ x: 50, y: 52 })
+      setActiveSection(node.name)
+    }
+
+    if (action === 'view') {
+      const hallOverlayMap = {
+        music: 'music',
+        store: 'store',
+        shows: 'shows',
+        'course-link': 'courses'
+      }
+
+      if (currentMap === 'hall' && hallOverlayMap[node.id]) {
+        setHallOverlay(hallOverlayMap[node.id])
+      }
+
+      setActiveSection(node.name)
+    }
+
+    if (action === 'quest') {
+      setActiveSection(`${node.name} — Join quest placeholder`)
+    }
+
+    closeDialogue()
+  }
+
+
+  const getNonQuestActions = (node) => {
+    const actionMap = {
+      music: { primary: 'Open Player', secondary: 'Play Music' },
+      store: { primary: 'Browse Items' },
+      shows: { primary: 'View Shows', secondary: 'Book Now' },
+      'course-link': { primary: 'View Courses' },
+      course: { primary: 'View Courses' }
+    }
+
+    return actionMap[node.id] || { primary: node.actionLabel || 'View page' }
+  }
+
+
+  const openBookingForm = (bookingType) => {
+    setBookingStatus('')
+    setBookingForm({
+      name: '',
+      email: '',
+      phone: '',
+      bookingType,
+      eventDate: '',
+      eventLocation: '',
+      estimatedBudget: '',
+      message: ''
+    })
+  }
+
+  const updateBookingForm = (field, value) => {
+    setBookingForm((prev) => ({ ...prev, [field]: value }))
+  }
+
+  const submitBookingForm = async (event) => {
+    event.preventDefault()
+    if (!bookingForm) return
+
+    setBookingSubmitting(true)
+    setBookingStatus('')
+
+    try {
+      const response = await fetch('https://formspree.io/f/mrerdyrr', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json'
+        },
+        body: JSON.stringify({
+          name: bookingForm.name,
+          email: bookingForm.email,
+          phone: bookingForm.phone,
+          bookingType: bookingForm.bookingType,
+          eventDate: bookingForm.eventDate,
+          eventLocation: bookingForm.eventLocation,
+          estimatedBudget: bookingForm.estimatedBudget,
+          message: bookingForm.message
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error('Form submission failed')
+      }
+
+      setBookingStatus("Booking inquiry sent. I’ll get back to you soon.")
+      setBookingForm((prev) =>
+        prev
+          ? {
+              ...prev,
+              name: '',
+              email: '',
+              phone: '',
+              eventDate: '',
+              eventLocation: '',
+              estimatedBudget: '',
+              message: ''
+            }
+          : prev
+      )
+    } catch {
+      setBookingStatus('Something went wrong. Please email civilizationexplorer@gmail.com directly.')
+    } finally {
+      setBookingSubmitting(false)
+    }
+  }
+
+  useEffect(() => {
+    setDialogueNode(null)
+    setHallOverlay(null)
+    setTrackSearch('')
+    setTrackCategory('All')
+    setStoreSearch('')
+    setStoreCategory('All')
+    setCourseSearch('')
+    setCourseCategory('All')
+    setBookingForm(null)
+    setBookingStatus('')
+  }, [currentMap])
+
+  useEffect(() => {
+    if (hallOverlay !== 'music' && audioRef.current) {
+      audioRef.current.pause()
+      setIsTrackPlaying(false)
+    }
+  }, [hallOverlay])
+
+
+  useEffect(() => {
+    if (step !== 4) return
+
+    const handleKeyDown = (event) => {
+      const key = event.key.toLowerCase()
+      if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'w', 'a', 's', 'd', 'enter'].includes(key)) {
+        event.preventDefault()
+      }
+
+      if (dialogueNode && key === 'enter') {
+        return
+      }
+
+      if (key === 'arrowup' || key === 'w') movePlayer(0, -stepAmount)
+      if (key === 'arrowdown' || key === 's') movePlayer(0, stepAmount)
+      if (key === 'arrowleft' || key === 'a') movePlayer(-stepAmount, 0)
+      if (key === 'arrowright' || key === 'd') movePlayer(stepAmount, 0)
+      if (key === 'enter' && nearbyLocation) openDialogue(nearbyLocation)
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [step, nearbyLocation, dialogueNode])
+
+  return (
+    <div className="app-shell arcade-screen">
+      <header className="arcade-panel banner">
+        <p className="kicker">Great Medicine Show RPG</p>
+        <h1 className="glyph-title">Hall of Great Works</h1>
+        <div className="glowing-divider" />
+      </header>
+
+      {step === 1 && (
+        <section className="arcade-panel intro-panel">
+          <h2 className="glyph-title">Welcome, Seeker</h2>
+          <p className="arcade-copy">Begin your journey through arcane halls, elemental temples, and project realms.</p>
+          <button className="arcade-button" onClick={() => setStep(2)}>
+            Begin Onboarding
+          </button>
+        </section>
+      )}
+
+      {step === 2 && (
+        <section className="arcade-panel">
+          <h2 className="glyph-title">Choose Your Elemental Guild</h2>
+          <div className="glowing-divider" />
+          <div className="grid guild-grid">
+            {guilds.map((option) => (
+              <button
+                key={option}
+                className={`temple-card ${guild === option ? 'selected' : ''}`}
+                onClick={() => setGuild(option)}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+          <button className="arcade-button" disabled={!guild} onClick={() => setStep(3)}>
+            Continue
+          </button>
+        </section>
+      )}
+
+      {step === 3 && (
+        <section className="arcade-panel">
+          <h2 className="glyph-title">Name Your Character</h2>
+          <div className="glowing-divider" />
+          <label htmlFor="characterName">Character Name</label>
+          <input
+            id="characterName"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="e.g. Ash of the Verdant Circuit"
+            maxLength={40}
+          />
+          <p className="small">Guild: {guild}</p>
+          <button className="arcade-button" disabled={!name.trim()} onClick={enterWorld}>
+            Enter World
+          </button>
+        </section>
+      )}
+
+      {step === 4 && (
+        <section className="arcade-panel world-panel">
+          <button className="arcade-button nav-toggle" onClick={() => setNavOpen((value) => !value)}>
+            {navOpen ? 'Hide Navigation' : 'Show Navigation'}
+          </button>
+
+          <aside className={`sidebar arcade-panel ${navOpen ? 'open' : ''}`}>
+            <h3 className="glyph-title">Map Navigation</h3>
+            <div className="glowing-divider" />
+            <p className="small">Current: {currentMapDef.title}</p>
+            {currentMapDef.nodes.map((section) => (
+              <button
+                key={section.id}
+                className={`arcade-button linkish ${activeSection === section.name ? 'selected' : ''}`}
+                onClick={() => {
+                  setActiveSection(section.name)
+                  setNavOpen(false)
+                }}
+              >
+                {section.name}
+              </button>
+            ))}
+          </aside>
+
+          <div className="world-content">
+            <div className="status-line">
+              <span>{name}</span>
+              <span>{guild}</span>
+              <span>{currentMapDef.title}</span>
+            </div>
+
+            <h2 className="glyph-title">{currentMapDef.title}</h2>
+            <div className="glowing-divider" />
+
+            <div className={`rpg-map ${currentMap === 'hall' ? 'map-hall' : ''}`} role="group" aria-label="2D RPG world map">
+              <div className="terrain terrain-forest" />
+              <div className="terrain terrain-ruins" />
+              <div className="terrain terrain-water" />
+              <div className="path-line path-main" />
+              <div className="path-line path-cross" />
+              {currentMap === 'hall' && (
+                <>
+                  <div className="hall-lane hall-lane-left" />
+                  <div className="hall-lane hall-lane-right" />
+                  <div className="hall-crystal" />
+                </>
+              )}
+
+              {currentMapDef.nodes.map((location) => (
+                <button
+                  key={location.id}
+                  className={`map-node temple-card tone-${location.tone} ${activeSection === location.name ? 'selected' : ''}`}
+                  style={{ left: `${location.x}%`, top: `${location.y}%`, transform: 'translate(-50%, -50%)' }}
+                  onClick={() => openDialogue(location)}
+                >
+                  <span className="node-label">{location.name}</span>
+                </button>
+              ))}
+
+              <div className="player-avatar" style={{ left: `${playerPosition.x}%`, top: `${playerPosition.y}%` }}>
+                <span className="player-core" />
+              </div>
+
+              {nearbyLocation && !dialogueNode && (
+                <button className="enter-prompt arcade-button" onClick={() => openDialogue(nearbyLocation)}>
+                  {nearbyLocation.prompt || `Enter ${nearbyLocation.name}`}
+                </button>
+              )}
+
+              {dialogueNode && (
+                <div className="dialogue-bubble" role="dialog" aria-label="Interaction dialogue">
+                  <p>{dialogueNode.prompt || `Interact with ${dialogueNode.name}?`}</p>
+                  <div className="dialogue-actions">
+                    {dialogueNode.type === 'map' ? (
+                      <>
+                        <button className="arcade-button" onClick={() => handleNodeAction(dialogueNode, 'yes')}>
+                          Yes
+                        </button>
+                        <button className="arcade-button" onClick={closeDialogue}>
+                          Not now
+                        </button>
+                      </>
+                    ) : dialogueNode.type === 'quest' ? (
+                      <>
+                        <button className="arcade-button" onClick={() => handleNodeAction(dialogueNode, 'quest')}>
+                          Join Quest
+                        </button>
+                        <button className="arcade-button" onClick={() => handleNodeAction(dialogueNode, 'view')}>
+                          View Page
+                        </button>
+                        <button className="arcade-button" onClick={closeDialogue}>
+                          Not now
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="arcade-button" onClick={() => handleNodeAction(dialogueNode, 'view')}>
+                          {getNonQuestActions(dialogueNode).primary}
+                        </button>
+                        {getNonQuestActions(dialogueNode).secondary && (
+                          <button className="arcade-button" onClick={() => handleNodeAction(dialogueNode, 'view')}>
+                            {getNonQuestActions(dialogueNode).secondary}
+                          </button>
+                        )}
+                        <button className="arcade-button" onClick={closeDialogue}>
+                          Not now
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="mobile-controls" aria-label="Map movement controls">
+              <button className="arcade-button" onClick={() => movePlayer(0, -stepAmount)}>
+                ↑
+              </button>
+              <div>
+                <button className="arcade-button" onClick={() => movePlayer(-stepAmount, 0)}>
+                  ←
+                </button>
+                <button className="arcade-button" onClick={() => movePlayer(stepAmount, 0)}>
+                  →
+                </button>
+              </div>
+              <button className="arcade-button" onClick={() => movePlayer(0, stepAmount)}>
+                ↓
+              </button>
+            </div>
+
+
+            <article className="arcade-panel section-panel">
+              <h3 className="glyph-title">{activeSection}</h3>
+              <p className="arcade-copy">
+                Placeholder content for <strong>{activeSection}</strong>. This panel will evolve into full rooms,
+                pages, and quests in future updates.
+              </p>
+            </article>
+          </div>
+        </section>
+      )}
+
+
+      {hallOverlay && (
+        <div className="page-overlay-backdrop" role="dialog" aria-label="Hall content overlay">
+          <section className="page-overlay arcade-panel">
+            {hallOverlay === 'music' && (
+              <>
+                <p className="overlay-status">MUSIC HALL PAGE OPEN</p>
+                <h3 className="glyph-title">Music Hall</h3>
+                <div className="glowing-divider" />
+                <div className="music-shell">
+                  <div className="album-art"><img src={activeTrack.coverImage} alt={activeTrack.title} /></div>
+                  <div>
+                    <p className="small">{activeTrack.title} — {activeTrack.artist}</p>
+                    <div className="music-controls">
+                      <button className="arcade-button" onClick={() => changeTrack(-1)}>Previous</button>
+                      <button className="arcade-button" onClick={togglePreview}>{isTrackPlaying ? 'Pause Preview' : 'Play Preview'}</button>
+                      <button className="arcade-button" onClick={() => changeTrack(1)}>Next</button>
+                    </div>
+                    <div className="track-list">
+                      <p className="small">{activeTrack.album}</p>
+                      <p className="small">{activeTrack.description}</p>
+                      {playerMessage && <p className="small">{playerMessage}</p>}
+                    </div>
+                    <div className="library-panel">
+                      <div className="library-controls">
+                        <input
+                          value={trackSearch}
+                          onChange={(event) => setTrackSearch(event.target.value)}
+                          placeholder="Search title, artist, album, description"
+                        />
+                        <select value={trackCategory} onChange={(event) => setTrackCategory(event.target.value)}>
+                          {trackCategories.map((category) => (
+                            <option key={category} value={category}>
+                              {category}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="track-selector">
+                        {filteredTracks.length === 0 ? (
+                          <p className="small">No tracks found</p>
+                        ) : (
+                          filteredTracks.map((track) => {
+                            const actualIndex = musicTracks.findIndex((item) => item.id === track.id)
+                            return (
+                              <button
+                                key={track.id}
+                                className={`arcade-button ${activeTrackIndex === actualIndex ? 'selected' : ''}`}
+                                onClick={() => selectTrack(actualIndex)}
+                              >
+                                {track.title} · {track.category}
+                              </button>
+                            )
+                          })
+                        )}
+                      </div>
+                    </div>
+                    <p className="small">Full on-site music streaming is coming soon. For now, listen on Spotify, SoundCloud, or YouTube.</p>
+                    <div className="platform-links">
+                      <a className="arcade-button" href="https://open.spotify.com/artist/1WJF0hb9fzUpj7JrfobXQb" target="_blank" rel="noreferrer">Spotify</a>
+                      <a className="arcade-button" href="https://soundcloud.com/user-553993483" target="_blank" rel="noreferrer">SoundCloud</a>
+                      <a className="arcade-button" href="https://www.youtube.com/@thegreatmedicineshow" target="_blank" rel="noreferrer">YouTube</a>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {hallOverlay === 'store' && (
+              <>
+                <p className="overlay-status">STORE PAGE OPEN</p>
+                <h3 className="glyph-title">Store</h3>
+                <div className="glowing-divider" />
+                <div className="business-controls">
+                  <input
+                    value={storeSearch}
+                    onChange={(event) => setStoreSearch(event.target.value)}
+                    placeholder="Search products"
+                  />
+                  <select value={storeCategory} onChange={(event) => setStoreCategory(event.target.value)}>
+                    {storeCategories.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="overlay-grid">
+                  {filteredStoreItems.length === 0 ? (
+                    <p className="small">No products found.</p>
+                  ) : (
+                    filteredStoreItems.map((item) => (
+                      <article key={item.id} className="overlay-card">
+                        <img src={item.image} alt={item.name} className="overlay-image" />
+                        <h4>{item.name}</h4>
+                        <p className="small">{item.category} · {item.price}</p>
+                        <p className="small">{item.description}</p>
+                        {item.url ? (
+                          <a className="arcade-button" href={item.url} target="_blank" rel="noreferrer">
+                            {item.buttonText || 'View Item'}
+                          </a>
+                        ) : (
+                          <button className="arcade-button">Coming Soon</button>
+                        )}
+                      </article>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+
+            {hallOverlay === 'shows' && (
+              <>
+                <p className="overlay-status">SHOWS & BOOKING PAGE OPEN</p>
+                <h3 className="glyph-title">Shows & Booking</h3>
+                <div className="glowing-divider" />
+                <div className="shows-grid">
+                  {upcomingShows.map((show) => (
+                    <article key={show.id} className="show-card">
+                      {show.flyerImage ? (
+                        <img src={show.flyerImage} alt={show.title} className="show-flyer" />
+                      ) : (
+                        <div className="show-flyer show-flyer-placeholder">Flyer coming soon.</div>
+                      )}
+                      <div className="show-body">
+                        <h4>{show.title}</h4>
+                        <p className="small">{show.date} · {show.location}</p>
+                        <p className="small">{show.description}</p>
+                        {show.ticketUrl ? (
+                          <a className="arcade-button" href={show.ticketUrl} target="_blank" rel="noreferrer">
+                            {show.ticketButtonText || 'Buy Tickets'}
+                          </a>
+                        ) : (
+                          <button className="arcade-button">Tickets coming soon</button>
+                        )}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+                <h4 className="glyph-title">Book The Great Medicine Show</h4>
+                <div className="overlay-grid">
+                  {bookingOffers.map((offer) => (
+                    <article key={offer.id} className="overlay-card">
+                      <h4>{offer.title}</h4>
+                      <p className="small">{offer.date} · {offer.location}</p>
+                      <p className="small">{offer.description}</p>
+                      <button className="arcade-button" onClick={() => openBookingForm(offer.title)}>
+                        Start Inquiry
+                      </button>
+                    </article>
+                  ))}
+                </div>
+                <button className="arcade-button" onClick={() => openBookingForm('General Booking Inquiry')}>
+                  Contact / Booking Inquiry
+                </button>
+              </>
+            )}
+
+            {hallOverlay === 'courses' && (
+              <>
+                <p className="overlay-status">COURSES ACADEMY PAGE OPEN</p>
+                <h3 className="glyph-title">Courses Academy</h3>
+                <div className="glowing-divider" />
+                <div className="business-controls">
+                  <input
+                    value={courseSearch}
+                    onChange={(event) => setCourseSearch(event.target.value)}
+                    placeholder="Search courses"
+                  />
+                  <select value={courseCategory} onChange={(event) => setCourseCategory(event.target.value)}>
+                    {courseCategories.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="overlay-grid">
+                  {filteredCourses.length === 0 ? (
+                    <p className="small">No courses found.</p>
+                  ) : (
+                    filteredCourses.map((course) => (
+                      <article key={course.id} className="overlay-card">
+                        <img src={course.image} alt={course.title} className="overlay-image" />
+                        <h4>{course.title}</h4>
+                        <p className="small">{course.category} · {course.level} · {course.lessons} lessons</p>
+                        <p className="small">{course.description}</p>
+                        <p className="small">{course.price}</p>
+                        {course.url ? (
+                          <a className="arcade-button" href={course.url} target="_blank" rel="noreferrer">
+                            View Course
+                          </a>
+                        ) : (
+                          <button className="arcade-button">Course coming soon</button>
+                        )}
+                      </article>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+
+            <button className="arcade-button" onClick={() => setHallOverlay(null)}>
+              Back to Hall
+            </button>
+          </section>
+        </div>
+      )}
+
+
+      {bookingForm && (
+        <div className="booking-modal-backdrop" role="dialog" aria-label="Booking inquiry form">
+          <form className="booking-modal arcade-panel" onSubmit={submitBookingForm}>
+            <h3 className="glyph-title">Booking Inquiry Form</h3>
+            <p className="small">Submit this form to send your booking inquiry directly.</p>
+            <div className="booking-grid">
+              <input required placeholder="Name" value={bookingForm.name} onChange={(event) => updateBookingForm('name', event.target.value)} />
+              <input required type="email" placeholder="Email" value={bookingForm.email} onChange={(event) => updateBookingForm('email', event.target.value)} />
+              <input placeholder="Phone" value={bookingForm.phone} onChange={(event) => updateBookingForm('phone', event.target.value)} />
+              <input required placeholder="Booking Type" value={bookingForm.bookingType} onChange={(event) => updateBookingForm('bookingType', event.target.value)} />
+              <input type="date" value={bookingForm.eventDate} onChange={(event) => updateBookingForm('eventDate', event.target.value)} />
+              <input placeholder="Event Location" value={bookingForm.eventLocation} onChange={(event) => updateBookingForm('eventLocation', event.target.value)} />
+              <input placeholder="Estimated Budget" value={bookingForm.estimatedBudget} onChange={(event) => updateBookingForm('estimatedBudget', event.target.value)} />
+              <textarea placeholder="Message / Details" value={bookingForm.message} onChange={(event) => updateBookingForm('message', event.target.value)} />
+            </div>
+            <div className="dialogue-actions">
+              <button type="submit" className="arcade-button" disabled={bookingSubmitting}>{bookingSubmitting ? 'Sending…' : 'Send Booking Inquiry'}</button>
+              <button type="button" className="arcade-button" onClick={() => setBookingForm(null)}>Close</button>
+            </div>
+            {bookingStatus && <p className="small">{bookingStatus}</p>}
+          </form>
+        </div>
+      )}
+
+
+      <footer className="footer">Boot OK</footer>
+    </div>
+  )
+}
+
+export default App
